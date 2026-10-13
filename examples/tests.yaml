@@ -1,0 +1,42 @@
+# Each test: copy the template, write the inputs, then run the checks.
+# Cell references use the form  SheetName!A1  (quote sheet names with spaces: "'My Sheet'!A1").
+# File paths are relative to this YAML file.
+
+tests:
+  - name: Net price is price x quantity
+    inputs:
+      Input!B1: 10
+      Input!B2: 3
+    checks:
+      - cell: Calc!B1
+        equals: 30                      # fixed value
+
+  - name: Gross matches value in reference workbook
+    inputs:
+      Input!B1: 10
+      Input!B2: 3
+    checks:
+      - cell: Calc!B3
+        equals_cell: Expected!A1        # cell in another workbook
+        file: reference.xlsx
+      - cell: Calc!B2
+        equals: 6
+        tolerance: 0.001                # allowed difference for numbers
+
+  - name: Unit price equals the price input
+    inputs:
+      Input!B1: 12.5
+      Input!B2: 4
+    checks:
+      - cell: Calc!B4
+        equals_cell: Input!B1           # cell in the same tested copy
+
+  - name: Deliberately failing example
+    inputs:
+      Input!B1: 10
+      Input!B2: 0
+    checks:
+      - cell: Calc!B1
+        equals: 99
+      - cell: Calc!B4
+        equals: 0
