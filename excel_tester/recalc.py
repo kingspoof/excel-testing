@@ -1,10 +1,17 @@
-"""Formula recalculation via headless LibreOffice.
+"""Formula recalculation.
 
 openpyxl cannot evaluate formulas, and when it saves a workbook it drops
-all cached formula results. We therefore let LibreOffice open the file,
-recalculate it and write it back so the computed values can be read.
+all cached formula results. An engine therefore has to compute them:
+
+- "formulas":    pure-Python `formulas` package. No install besides pip,
+                 but not every Excel function is supported.
+- "libreoffice": headless LibreOffice. Accurate, but must be installed.
+
+Both rewrite the workbook in place so that the computed values can be read
+with openpyxl (`data_only=True`).
 """
 
+import re
 import shutil
 import subprocess
 import tempfile
@@ -30,8 +37,65 @@ def find_soffice():
     return None
 
 
-def recalculate(path, timeout=120):
+ENGINES = ("formulas", "libreoffice")
+_KEY_RE = re.compile(r"^'?\[[^\]]+\](?P<sheet>.+?)'?!(?P<range>[A-Z]+\d+(?::[A-Z]+\d+)?)$")
+
+
+def recalculate(path, engine="formulas"):
     """Recalculate all formulas in the workbook at `path` (in place)."""
+    if engine == "formulas":
+        recalculate_formulas(path)
+    elif engine == "libreoffice":
+        recalculate_libreoffice(path)
+    else:
+        raise ValueError(f"Unknown engine {engine!r}. Choose one of {ENGINES}.")
+
+
+def _plain(value):
+    """Convert a `formulas` result value to a plain Python value."""
+    if hasattr(value, "item"):  # numpy scalar
+        value = value.item()
+    if type(value).__name__ == "XlError":
+        return str(value)  # e.g. "#DIV/0!"
+    if isinstance(value, str) and value == "":
+        return None
+    return value
+
+
+def recalculate_formulas(path):
+    try:
+        import formulas
+        from openpyxl import load_workbook
+        from openpyxl.utils import range_boundaries
+    except ImportError as e:
+        raise RecalcError("The 'formulas' package is missing. Run: pip install formulas") from e
+
+    path = Path(path)
+    try:
+        model = formulas.ExcelModel().loads(str(path)).finish()
+        solution = model.calculate()
+    except Exception as e:  # noqa: BLE001
+        raise RecalcError(f"The 'formulas' engine could not calculate the workbook: {e}") from e
+
+    wb = load_workbook(path, keep_vba=path.suffix.lower() == ".xlsm")
+    sheets = {name.upper(): name for name in wb.sheetnames}
+    for key, ranges in solution.items():
+        m = _KEY_RE.match(key)
+        if not m or m.group("sheet").upper() not in sheets:
+            continue  # named ranges, other workbooks, ...
+        ws = wb[sheets[m.group("sheet").upper()]]
+        min_col, min_row, _, _ = range_boundaries(m.group("range"))
+        for r, row in enumerate(ranges.value):
+            for c, value in enumerate(row):
+                cell = ws.cell(min_row + r, min_col + c)
+                # Replace formulas by their results; leave constants alone.
+                if cell.data_type == "f" or isinstance(cell.value, str) and cell.value.startswith("="):
+                    cell.value = _plain(value)
+    wb.save(path)
+    wb.close()
+
+
+def recalculate_libreoffice(path, timeout=120):
     soffice = find_soffice()
     if soffice is None:
         raise RecalcError(

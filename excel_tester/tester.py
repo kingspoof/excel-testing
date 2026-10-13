@@ -1,5 +1,6 @@
 """Run YAML-defined tests against an Excel template."""
 
+import datetime as dt
 import math
 import re
 import shutil
@@ -11,7 +12,7 @@ from pathlib import Path
 import openpyxl
 import yaml
 
-from .recalc import recalculate
+from .recalc import ENGINES, recalculate
 
 EXCEL_ERRORS = {"#DIV/0!", "#N/A", "#NAME?", "#NULL!", "#NUM!", "#REF!", "#VALUE!"}
 _REF_RE = re.compile(r"^(?:'(?P<q>[^']+)'|(?P<s>[^!]+))!\$?(?P<col>[A-Za-z]{1,3})\$?(?P<row>\d+)$")
@@ -62,7 +63,14 @@ def get_cell(wb, ref, workbook_label):
     return wb[sheet][cell]
 
 
+def _as_datetime(value):
+    if isinstance(value, dt.date) and not isinstance(value, dt.datetime):
+        return dt.datetime.combine(value, dt.time())
+    return value
+
+
 def values_equal(actual, expected, tolerance):
+    actual, expected = _as_datetime(actual), _as_datetime(expected)
     if isinstance(actual, bool) or isinstance(expected, bool):
         return actual == expected
     if isinstance(actual, (int, float)) and isinstance(expected, (int, float)):
@@ -81,14 +89,17 @@ class ExcelTester:
         tester.print_report(results)
     """
 
-    def __init__(self, template, tolerance=1e-9, recalc=True):
+    def __init__(self, template, engine="formulas", tolerance=1e-9):
+        """engine: "formulas" (pure Python), "libreoffice", or None (no recalculation)."""
         self.template = Path(template).resolve()
         if not self.template.exists():
             raise FileNotFoundError(f"Template not found: {self.template}")
         if self.template.suffix.lower() not in (".xlsx", ".xlsm"):
             raise ValueError(f"Template must be .xlsx or .xlsm, got {self.template.name}")
         self.tolerance = tolerance
-        self.recalc = recalc
+        if engine not in (*ENGINES, None):
+            raise ValueError(f"engine must be one of {ENGINES} or None, got {engine!r}")
+        self.engine = engine
 
     # ---------- loading the spec ----------
 
@@ -149,8 +160,8 @@ class ExcelTester:
             wb.save(copy)
             wb.close()
 
-            if self.recalc:
-                recalculate(copy)
+            if self.engine:
+                recalculate(copy, self.engine)
 
             # 3) check values
             result_wb = openpyxl.load_workbook(copy, data_only=True)
@@ -194,7 +205,12 @@ class ExcelTester:
             raise SpecError(f"Check on {ref} needs either 'equals' or 'equals_cell'.")
 
         if isinstance(actual, str) and actual in EXCEL_ERRORS:
-            return CheckResult(desc, False, f"{ref} shows the Excel error {actual}.")
+            hint = (
+                " The formula may use a function the calculation engine does not support."
+                if actual == "#NAME?" and self.engine == "formulas"
+                else ""
+            )
+            return CheckResult(desc, False, f"{ref} shows the Excel error {actual}.{hint}")
         if values_equal(actual, expected, tol):
             return CheckResult(desc, True)
         return CheckResult(
