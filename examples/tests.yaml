@@ -1,6 +1,9 @@
 # Each test: copy the template, write the inputs, then run the checks.
 # Cell references use the form  SheetName!A1  (quote sheet names with spaces: "'My Sheet'!A1").
-# File paths are relative to this YAML file.
+# File paths are relative to this YAML file (absolute paths work too).
+
+template: template.xlsx   # the Excel file to test
+tolerance: 1e-7           # allowed difference for numbers (optional, can also be set per check)
 
 tests:
   - name: Net price is price x quantity

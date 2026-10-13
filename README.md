@@ -13,15 +13,15 @@ Tests an Excel template using a YAML specification. For each test it:
 pip install -r requirements.txt
 ```
 
-Open `run_tests.ipynb`, set `TEMPLATE` and `TESTS`, and run all cells. From Python:
+Open `run_tests.ipynb`, set `TESTS`, and run all cells. From Python:
 
 ```python
 from excel_tester import ExcelTester
-tester = ExcelTester("template.xlsx")          # engine="formulas" (default) or "libreoffice"
+tester = ExcelTester()          # engine="formulas" (default) or "libreoffice"
 tester.print_report(tester.run("tests.yaml"))
 ```
 
-See `examples/tests.yaml` for the YAML format (regenerate the example workbooks with `python examples/make_examples.py`).
+The Excel to test is set with `template:` at the top of the YAML. See `examples/tests.yaml` for the format (regenerate the example workbooks with `python examples/make_examples.py`).
 
 ## Formula engine: read this
 

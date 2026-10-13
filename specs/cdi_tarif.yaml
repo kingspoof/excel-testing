@@ -1,0 +1,16 @@
+# Paths: absolute, or relative to this YAML file.
+template: template.xlsx        # TODO: replace with the Excel to test
+tolerance: 1e-7                # allowed difference for numbers
+
+tests:
+  - name: CDI input 100000 / 100000 matches reference tariff
+    inputs:
+      CDI_Input!D7: 100000
+      CDI_Input!E7: 100000
+    checks:
+      - cell: Tarif!H1
+        equals_cell: Tarif!B33
+        file: reference.xlsx   # TODO: replace with the absolute path of the reference Excel
+      - cell: Tarif!H3
+        equals_cell: Tarif!D33
+        file: reference.xlsx   # TODO: same reference Excel

@@ -63,6 +63,14 @@ def get_cell(wb, ref, workbook_label):
     return wb[sheet][cell]
 
 
+def _to_tolerance(value):
+    # PyYAML reads e.g. 1e-7 (without a dot) as a string.
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise SpecError(f"tolerance must be a number, got {value!r}") from None
+
+
 def _as_datetime(value):
     if isinstance(value, dt.date) and not isinstance(value, dt.datetime):
         return dt.datetime.combine(value, dt.time())
@@ -81,25 +89,26 @@ def values_equal(actual, expected, tolerance):
 
 
 class ExcelTester:
-    """Tests one Excel template.
+    """Runs YAML test specifications.
+
+    The template to test is set with 'template:' at the top of the YAML file.
 
     Example:
-        tester = ExcelTester("template.xlsx")
+        tester = ExcelTester()
         results = tester.run("tests.yaml")
         tester.print_report(results)
     """
 
-    def __init__(self, template, engine="formulas", tolerance=1e-9):
-        """engine: "formulas" (pure Python), "libreoffice", or None (no recalculation)."""
-        self.template = Path(template).resolve()
-        if not self.template.exists():
-            raise FileNotFoundError(f"Template not found: {self.template}")
-        if self.template.suffix.lower() not in (".xlsx", ".xlsm"):
-            raise ValueError(f"Template must be .xlsx or .xlsm, got {self.template.name}")
-        self.tolerance = tolerance
+    def __init__(self, engine="formulas", tolerance=1e-7):
+        """engine: "formulas" (pure Python), "libreoffice", or None (no recalculation).
+
+        tolerance: default allowed difference for numbers; the YAML file can
+        override it globally ('tolerance:' at the top) or per check.
+        """
         if engine not in (*ENGINES, None):
             raise ValueError(f"engine must be one of {ENGINES} or None, got {engine!r}")
         self.engine = engine
+        self.default_tolerance = tolerance
 
     # ---------- loading the spec ----------
 
@@ -111,12 +120,21 @@ class ExcelTester:
             raise SpecError(f"{yaml_path.name} is not valid YAML:\n{e}") from e
         if not isinstance(spec, dict) or not isinstance(spec.get("tests"), list):
             raise SpecError(f"{yaml_path.name} must contain a top-level 'tests:' list.")
-        return spec, yaml_path.parent
+        base_dir = yaml_path.parent
+        if not spec.get("template"):
+            raise SpecError(f"{yaml_path.name} must say which Excel to test, e.g. 'template: my_file.xlsx'.")
+        template = (base_dir / str(spec["template"])).resolve()
+        if not template.exists():
+            raise SpecError(f"Template not found: {template}")
+        if template.suffix.lower() not in (".xlsx", ".xlsm"):
+            raise SpecError(f"Template must be .xlsx or .xlsm, got {template.name}")
+        return spec, base_dir, template
 
     # ---------- running ----------
 
     def run(self, yaml_path):
-        spec, base_dir = self.load_spec(yaml_path)
+        spec, base_dir, self.template = self.load_spec(yaml_path)
+        self.tolerance = _to_tolerance(spec.get("tolerance", self.default_tolerance))
         results = []
         for i, test in enumerate(spec["tests"], start=1):
             name = test.get("name", f"Test {i}") if isinstance(test, dict) else f"Test {i}"
@@ -179,7 +197,7 @@ class ExcelTester:
         if not isinstance(check, dict) or "cell" not in check:
             raise SpecError(f"Each check needs a 'cell' key, got: {check!r}")
         ref = check["cell"]
-        tol = check.get("tolerance", self.tolerance)
+        tol = _to_tolerance(check.get("tolerance", self.tolerance))
         actual = get_cell(wb, ref, "the tested copy").value
 
         if "equals" in check:
